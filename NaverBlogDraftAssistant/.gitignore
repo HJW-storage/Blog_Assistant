@@ -1,0 +1,13 @@
+# Visual Studio 임시 파일
+.vs/
+
+# 빌드 결과물
+bin/
+obj/
+
+# 사용자별 설정
+*.user
+*.suo
+
+# Claude Code 로컬 설정
+.claude/settings.local.json
