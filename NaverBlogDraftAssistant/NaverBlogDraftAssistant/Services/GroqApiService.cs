@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -10,17 +11,58 @@ namespace NaverBlogDraftAssistant.Services
 {
     /// <summary>
     /// Groq API 호출 (OpenAI 호환 포맷)
-    /// 무료 한도: 분당 30회, 일 500,000 토큰 (llama-3.3-70b-versatile 기준)
+    /// 무료 한도: 분당 30회, 일 500,000 토큰 (openai/gpt-oss-120b 기준)
     /// API 키 발급: https://console.groq.com
     /// </summary>
     public class GroqApiService
     {
         private const string ApiUrl = "https://api.groq.com/openai/v1/chat/completions";
-        private const string Model = "llama-3.3-70b-versatile";
+        private const string ModelsUrl = "https://api.groq.com/openai/v1/models";
+
+        /// <summary>
+        /// 블로그 글쓰기(한국어 문체 모사, 지시사항 따르기)에 권장하는 모델.
+        /// Groq의 production 등급 모델 중 텍스트 품질이 가장 좋아 기본 추천값으로 사용하고,
+        /// 목록 조회 실패 시 최후 폴백으로도 사용합니다. 실제 목록에 없으면 자동으로 무시되므로
+        /// 이 모델이 나중에 폐기되어도 앱이 깨지지 않습니다.
+        /// </summary>
+        public const string RecommendedModel = "openai/gpt-oss-120b";
+
+        // 채팅/텍스트 생성 용도가 아닌 모델(음성 인식, 콘텐츠 검열 전용 등)은 목록에서 제외
+        private static readonly string[] ExcludedModelKeywords = { "whisper", "tts", "guard", "prompt-guard" };
 
         private readonly HttpClient _http = new();
 
-        public async Task<string> GenerateDraftAsync(string apiKey, StyleProfile profile, string title, string outline)
+        /// <summary>
+        /// Groq 계정에서 현재 사용 가능한 모델 ID 목록을 가져옵니다.
+        /// 모델이 언제든 추가/폐기될 수 있으므로 하드코딩 대신 매번 최신 목록을 조회합니다.
+        /// </summary>
+        public async Task<List<string>> GetAvailableModelsAsync(string apiKey)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, ModelsUrl);
+            request.Headers.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+
+            var response = await _http.SendAsync(request);
+            var body = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+                throw new Exception($"모델 목록 조회 실패 ({(int)response.StatusCode}): {body}");
+
+            using var doc = JsonDocument.Parse(body);
+            var ids = new List<string>();
+            foreach (var item in doc.RootElement.GetProperty("data").EnumerateArray())
+            {
+                var id = item.GetProperty("id").GetString();
+                if (string.IsNullOrWhiteSpace(id)) continue;
+                if (ExcludedModelKeywords.Any(k => id.Contains(k, StringComparison.OrdinalIgnoreCase))) continue;
+                ids.Add(id);
+            }
+
+            ids.Sort(StringComparer.OrdinalIgnoreCase);
+            return ids;
+        }
+
+        public async Task<string> GenerateDraftAsync(string apiKey, string model, StyleProfile profile, string title, string outline)
         {
             var systemPrompt =
                 "당신은 사용자의 네이버 블로그 글쓰기 스타일을 그대로 이어서 써주는 보조 작가입니다.\n" +
@@ -36,7 +78,7 @@ namespace NaverBlogDraftAssistant.Services
 
             var requestBody = new
             {
-                model = Model,
+                model,
                 max_tokens = 2000,
                 messages = new object[]
                 {
@@ -92,7 +134,7 @@ namespace NaverBlogDraftAssistant.Services
         /// 블로그 글 샘플을 AI에게 분석시켜 자연어 문체 지침을 생성합니다 (방법 2).
         /// 샘플 텍스트는 각 800자로 잘라 토큰 소모를 제한합니다.
         /// </summary>
-        public async Task<string> AnalyzeStyleWithAiAsync(string apiKey, List<string> sampleTexts)
+        public async Task<string> AnalyzeStyleWithAiAsync(string apiKey, string model, List<string> sampleTexts)
         {
             var excerpts = string.Join("\n\n---\n\n", sampleTexts
                 .Select((t, i) => $"[샘플 {i + 1}]\n{(t.Length > 800 ? t[..800] : t)}"));
@@ -111,7 +153,7 @@ namespace NaverBlogDraftAssistant.Services
 
             var requestBody = new
             {
-                model = Model,
+                model,
                 max_tokens = 400,
                 messages = new object[]
                 {
@@ -127,7 +169,7 @@ namespace NaverBlogDraftAssistant.Services
         /// <summary>
         /// 블로그 제목을 입력받아 관련 키워드·주제·소제목 아이디어를 AI로 제안합니다.
         /// </summary>
-        public async Task<string> SuggestKeywordsAsync(string apiKey, string title)
+        public async Task<string> SuggestKeywordsAsync(string apiKey, string model, string title)
         {
             var systemPrompt =
                 "당신은 블로그 콘텐츠 기획 전문가입니다. " +
@@ -144,7 +186,7 @@ namespace NaverBlogDraftAssistant.Services
 
             var requestBody = new
             {
-                model = Model,
+                model,
                 max_tokens = 600,
                 messages = new object[]
                 {

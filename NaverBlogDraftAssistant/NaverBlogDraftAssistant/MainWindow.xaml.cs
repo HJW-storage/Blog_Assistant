@@ -27,9 +27,61 @@ namespace NaverBlogDraftAssistant
         public MainWindow()
         {
             InitializeComponent();
+            ModelComboBox.ItemsSource = new List<string> { GroqApiService.RecommendedModel };
+            ModelComboBox.SelectedIndex = 0;
+            ModelStatusLabel.Text = "💡 블로그 글쓰기 추천: openai/gpt-oss-120b";
         }
 
         private string ApiKey => ApiKeyBox.Password;
+
+        private string SelectedModel =>
+            string.IsNullOrWhiteSpace(ModelComboBox.Text) ? GroqApiService.RecommendedModel : ModelComboBox.Text.Trim();
+
+        // ---------- 모델 목록 새로고침 ----------
+
+        private async void RefreshModelsButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(ApiKey))
+            {
+                MessageBox.Show("API 키를 먼저 입력해주세요.", "안내", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            RefreshModelsButton.IsEnabled = false;
+            ModelStatusLabel.Text = "모델 목록 조회 중...";
+
+            try
+            {
+                var models = await _groqApi.GetAvailableModelsAsync(ApiKey);
+                var previouslySelected = SelectedModel;
+                var recommended = models.Contains(GroqApiService.RecommendedModel);
+
+                // 추천 모델이 목록에 있으면 맨 위로 올려서 눈에 띄게 함
+                var ordered = recommended
+                    ? models.OrderBy(m => m == GroqApiService.RecommendedModel ? 0 : 1)
+                            .ThenBy(m => m, StringComparer.OrdinalIgnoreCase)
+                            .ToList()
+                    : models;
+
+                ModelComboBox.ItemsSource = ordered;
+                ModelComboBox.Text = models.Contains(previouslySelected) ? previouslySelected
+                    : recommended ? GroqApiService.RecommendedModel
+                    : models.FirstOrDefault() ?? GroqApiService.RecommendedModel;
+
+                ModelStatusLabel.Text = recommended
+                    ? $"완료 — {models.Count}개 모델  ·  💡 블로그 글쓰기 추천: openai/gpt-oss-120b (품질·속도 균형 최고)"
+                    : $"완료 — {models.Count}개 모델  ·  ⚠ 추천 모델(openai/gpt-oss-120b)이 목록에 없습니다. 직접 선택해주세요.";
+            }
+            catch (Exception ex)
+            {
+                ModelStatusLabel.Text = "조회 실패.";
+                MessageBox.Show($"모델 목록 조회 중 오류:\n{ex.Message}", "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                RefreshModelsButton.IsEnabled = true;
+            }
+        }
 
         // ---------- 탭 1: 스타일 학습 ----------
 
@@ -138,7 +190,7 @@ namespace NaverBlogDraftAssistant
 
             try
             {
-                var draft = await _groqApi.GenerateDraftAsync(ApiKey, _styleProfile, TitleBox.Text, OutlineBox.Text);
+                var draft = await _groqApi.GenerateDraftAsync(ApiKey, SelectedModel, _styleProfile, TitleBox.Text, OutlineBox.Text);
                 DraftBox.Text = draft;
             }
             catch (Exception ex)
@@ -269,7 +321,7 @@ namespace NaverBlogDraftAssistant
 
             try
             {
-                var description = await _groqApi.AnalyzeStyleWithAiAsync(ApiKey, sample);
+                var description = await _groqApi.AnalyzeStyleWithAiAsync(ApiKey, SelectedModel, sample);
                 _styleProfile.AiStyleDescription = description;
                 // ToPromptSummary()가 AI 설명을 포함하므로 결과 박스 갱신
                 StyleSummaryBox.Text = _styleProfile.ToPromptSummary();
@@ -309,7 +361,7 @@ namespace NaverBlogDraftAssistant
 
             try
             {
-                var suggestions = await _groqApi.SuggestKeywordsAsync(ApiKey, title);
+                var suggestions = await _groqApi.SuggestKeywordsAsync(ApiKey, SelectedModel, title);
                 KeywordSuggestBox.Text = suggestions;
             }
             catch (Exception ex)

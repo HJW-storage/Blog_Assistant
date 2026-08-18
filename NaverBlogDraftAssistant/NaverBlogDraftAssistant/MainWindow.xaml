@@ -16,8 +16,16 @@
                 <TextBlock Text="  console.groq.com 에서 무료 발급  ·  앱은 키를 저장하지 않습니다"
                            Foreground="Gray" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="11"/>
             </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,3,0,3">
+                <TextBlock Text="모델:" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="SemiBold"/>
+                <ComboBox x:Name="ModelComboBox" Width="260" IsEditable="True"/>
+                <Button x:Name="RefreshModelsButton" Content="모델 목록 불러오기" Width="150" Margin="8,0,0,0"
+                        Click="RefreshModelsButton_Click"/>
+                <TextBlock x:Name="ModelStatusLabel" Text=""
+                           Foreground="Gray" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="11"/>
+            </StackPanel>
             <TextBlock Foreground="#999999" FontSize="10" Margin="4,0,0,0"
-                       Text="무료 한도 (llama-3.3-70b-versatile 기준): 분당 30회 요청  ·  일 14,400회 요청  ·  일 500,000 토큰"/>
+                       Text="※ 목록은 Groq 계정에서 실시간으로 조회됩니다. 모델이 폐기/추가되어도 이 앱은 계속 최신 목록을 보여줍니다."/>
         </StackPanel>
 
         <TabControl Grid.Row="1">
